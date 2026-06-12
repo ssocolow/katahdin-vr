@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Katahdin Flight — WebXR</title>
+<style>
+  :root {
+    --granite: #14181d;
+    --granite-2: #1d242c;
+    --mist: #aebdc9;
+    --snow: #eef3f6;
+    --blaze: #e8623a;      /* AT blaze orange-red */
+    --spruce: #4f7a5e;
+    --contour: #2a3540;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; background: var(--granite); }
+  body { font-family: Georgia, 'Times New Roman', serif; color: var(--snow); }
+  canvas { display: block; }
+
+  /* ---- launch panel ---- */
+  #launch {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    background:
+      repeating-radial-gradient(ellipse 140% 90% at 60% 110%,
+        transparent 0 46px, var(--contour) 46px 47px),
+      linear-gradient(180deg, var(--granite) 0%, var(--granite-2) 100%);
+    z-index: 10; padding: 24px;
+  }
+  .card { max-width: 460px; width: 100%; }
+  .eyebrow {
+    font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+    font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--mist); margin-bottom: 14px;
+  }
+  .eyebrow b { color: var(--blaze); font-weight: 600; }
+  h1 { font-size: 42px; font-weight: 400; line-height: 1.05; letter-spacing: -0.01em; margin-bottom: 10px; }
+  h1 em { font-style: italic; color: var(--mist); }
+  .sub { color: var(--mist); font-size: 15px; line-height: 1.55; margin-bottom: 28px; }
+  label {
+    display: block; font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--mist); margin-bottom: 8px;
+  }
+  #apiKey {
+    width: 100%; padding: 13px 14px; font-size: 14px;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    background: rgba(0,0,0,0.35); color: var(--snow);
+    border: 1px solid var(--contour); border-radius: 6px; outline: none;
+  }
+  #apiKey:focus { border-color: var(--blaze); box-shadow: 0 0 0 3px rgba(232,98,58,0.25); }
+  .choices { display: flex; gap: 18px; }
+  .choices label {
+    display: flex; align-items: center; gap: 7px; cursor: pointer; margin: 0;
+    text-transform: none; letter-spacing: 0; font-size: 12.5px; color: var(--snow);
+  }
+  .choices input { accent-color: var(--blaze); }
+  #startBtn {
+    margin-top: 14px; width: 100%; padding: 14px; font-size: 15px; cursor: pointer;
+    font-family: Georgia, serif; font-style: italic;
+    background: var(--blaze); color: #fff; border: none; border-radius: 6px;
+    transition: transform .12s ease, background .12s ease;
+  }
+  #startBtn:hover { background: #f0744d; }
+  #startBtn:active { transform: translateY(1px); }
+  #startBtn:focus-visible { outline: 3px solid var(--snow); outline-offset: 2px; }
+  .hint { margin-top: 18px; font-size: 12.5px; line-height: 1.6; color: #7e8d99; }
+  .hint code { font-family: ui-monospace, Menlo, monospace; color: var(--mist); }
+  .hint a { color: var(--blaze); text-decoration: underline; text-underline-offset: 2px; }
+  #status { margin-top: 12px; font-size: 13px; min-height: 18px; color: var(--blaze); }
+
+  /* ---- in-experience HUD ---- */
+  #hud {
+    position: fixed; left: 14px; bottom: 14px; z-index: 5; display: none;
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px;
+    color: var(--mist); background: rgba(20,24,29,0.6); padding: 8px 10px;
+    border-radius: 6px; line-height: 1.6; pointer-events: none;
+  }
+  #hud b { color: var(--snow); font-weight: 600; }
+  .hudKeys {
+    margin-top: 6px; padding-top: 6px; color: #8b98a3;
+    border-top: 1px solid rgba(174,189,201,0.25);
+  }
+  #credits {
+    position: fixed; right: 10px; bottom: 10px; z-index: 5; display: none;
+    font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: #8b98a3;
+    background: rgba(20,24,29,0.55); padding: 4px 8px; border-radius: 4px;
+    max-width: 60vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+</style>
+</head>
+<body>
+
+<div id="launch">
+  <div class="card">
+    <div class="eyebrow">45.9044° N · 68.9213° W &nbsp;·&nbsp; <b>NORTHERN TERMINUS, A.T.</b></div>
+    <h1>Fly <em>Katahdin</em></h1>
+    <p class="sub">A WebXR flight over Baxter Peak, rendered live from Google's
+      Photorealistic 3D Tiles. Works flat on a desktop, or in full immersion on a Quest.</p>
+
+    <label for="apiKey">Google Maps Platform API key</label>
+    <input id="apiKey" type="password" autocomplete="off" spellcheck="false"
+           placeholder="AIza..." />
+    <label style="margin-top:16px">Trail detail</label>
+    <div class="choices">
+      <label><input type="radio" name="trailRes" value="high" checked> High — full GPX (27 MB)</label>
+      <label><input type="radio" name="trailRes" value="fast"> Fast — simplified</label>
+    </div>
+    <button id="startBtn">Begin the climb →</button>
+    <div id="status" role="status"></div>
+
+    <p class="hint">
+      Needs a key with the <code>Map Tiles API</code> enabled — it stays on this page and
+      is sent only to <code>tile.googleapis.com</code>. Don't have one? Follow
+      <a href="https://developers.google.com/maps/documentation/tile/get-api-key"
+         target="_blank" rel="noopener">Google's guide</a>: create a Google Cloud project,
+      enable the <b>Map Tiles API</b>, then copy your key from
+      <a href="https://console.cloud.google.com/google/maps-apis/credentials"
+         target="_blank" rel="noopener">APIs &amp; Services → Credentials</a>.
+      If you publish this page, restrict the key to your site's domain.<br><br>
+      <b>Quest:</b> serve this file over HTTPS (e.g. GitHub Pages), open it in the Quest
+      browser, then tap <i>Enter VR</i>.<br>
+      <b>Desktop:</b> the full control reference appears in the corner once you're flying.
+    </p>
+  </div>
+</div>
+
+<div id="hud">
+  <div id="hudStats"></div>
+  <div class="hudKeys">
+    <b>W A S D</b> fly · <b>R / F</b> up / down · <b>Shift</b> 5× boost ·
+    <b>drag</b> look · <b>T</b> trail detail<br>
+    <b>VR</b> — <b>L stick</b> fly where you look · <b>R stick</b> turn &amp; altitude ·
+    <b>trigger</b> boost
+  </div>
+</div>
+<div id="credits"></div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
+    "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
+    "3d-tiles-renderer": "https://esm.sh/3d-tiles-renderer@0.4.28?external=three",
+    "3d-tiles-renderer/plugins": "https://esm.sh/3d-tiles-renderer@0.4.28/plugins?external=three",
+    "3d-tiles-renderer/core": "https://esm.sh/3d-tiles-renderer@0.4.28/core?external=three"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { VRButton } from 'three/addons/webxr/VRButton.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { TilesRenderer } from '3d-tiles-renderer';
+import { GoogleCloudAuthPlugin, GLTFExtensionsPlugin } from '3d-tiles-renderer/plugins';
+
+// ---- Mount Katahdin, Baxter Peak ----
+const LAT = 45.9044, LON = -68.9213, SUMMIT_M = 1606;
+
+const launch   = document.getElementById('launch');
+const status   = document.getElementById('status');
+const hud      = document.getElementById('hud');
+const hudStats = document.getElementById('hudStats');
+const credits = document.getElementById('credits');
+
+let renderer, scene, camera, player, tiles;
+let started = false;
+
+document.getElementById('startBtn').addEventListener('click', () => {
+  const key = document.getElementById('apiKey').value.trim();
+  if (!key) { status.textContent = 'Enter an API key to continue.'; return; }
+  if (!started) { started = true; init(key); }
+});
+document.getElementById('apiKey').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('startBtn').click();
+});
+
+// Build a matrix for the local East-North-Up frame at a WGS84 lat/lon/height.
+function enuToEcef(latDeg, lonDeg, h) {
+  const lat = THREE.MathUtils.degToRad(latDeg);
+  const lon = THREE.MathUtils.degToRad(lonDeg);
+  const a = 6378137.0, e2 = 0.00669437999014;
+  const sLat = Math.sin(lat), cLat = Math.cos(lat);
+  const sLon = Math.sin(lon), cLon = Math.cos(lon);
+  const N = a / Math.sqrt(1 - e2 * sLat * sLat);
+  const px = (N + h) * cLat * cLon;
+  const py = (N + h) * cLat * sLon;
+  const pz = (N * (1 - e2) + h) * sLat;
+  const up    = new THREE.Vector3(cLat * cLon, cLat * sLon, sLat);
+  const east  = new THREE.Vector3(-sLon, cLon, 0);
+  const north = new THREE.Vector3().crossVectors(up, east);
+  const m = new THREE.Matrix4().makeBasis(east, north, up);
+  m.setPosition(px, py, pz);
+  return m;
+}
+
+function init(apiKey) {
+  status.textContent = 'Loading tiles…';
+
+  scene = new THREE.Scene();
+  const sky = new THREE.Color(0x9cc0de);
+  scene.background = sky;
+  scene.fog = new THREE.Fog(sky, 12000, 90000);
+
+  camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 2, 120000);
+
+  // Player rig: move/rotate this, the XR headset rides inside it.
+  player = new THREE.Group();
+  player.add(camera);
+  player.position.set(0, 500, 3200);   // ~500 m above the summit, 3.2 km south
+  scene.add(player);
+
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.xr.enabled = true;
+  renderer.xr.setFoveation(1);
+  document.body.appendChild(renderer.domElement);
+
+  // ---- Google Photorealistic 3D Tiles ----
+  tiles = new TilesRenderer();
+  tiles.registerPlugin(new GoogleCloudAuthPlugin({ apiToken: apiKey, autoRefreshToken: true }));
+  const draco = new DRACOLoader();
+  draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+  tiles.registerPlugin(new GLTFExtensionsPlugin({ dracoLoader: draco }));
+  tiles.errorTarget = 20;        // looser = faster on Quest; lower for sharper tiles
+  tiles.setCamera(camera);
+  tiles.setResolutionFromRenderer(camera, renderer);
+
+  // Re-base the globe: put Baxter Peak at the origin with +Y up, north along -Z.
+  const frame = enuToEcef(LAT, LON, SUMMIT_M);
+  tiles.group.matrix
+    .makeRotationX(-Math.PI / 2)
+    .multiply(frame.invert());
+  tiles.group.matrixAutoUpdate = false;
+  scene.add(tiles.group);
+
+  // The imagery is pre-lit; unlit materials look correct and render faster.
+  tiles.addEventListener('load-model', ({ scene: tileScene }) => {
+    tileScene.traverse(c => {
+      if (c.material) {
+        const basic = new THREE.MeshBasicMaterial({ map: c.material.map });
+        c.material.dispose();
+        c.material = basic;
+      }
+    });
+  });
+  tiles.addEventListener('load-tile-set', () => {
+    status.textContent = '';
+    launch.style.display = 'none';
+    hud.style.display = 'block';
+    credits.style.display = 'block';
+    document.body.appendChild(VRButton.createButton(renderer));
+  });
+  let tileErrMsg = '';
+  tiles.addEventListener('load-error', ({ error }) => {
+    console.error(error);
+    if (launch.style.display !== 'none') {
+      started = false;
+      status.textContent = `Tiles failed to load — ${error?.message ||
+        'check that the key is valid and the Map Tiles API is enabled.'}`;
+    } else {
+      tileErrMsg = ` · ⚠ ${error?.message || 'tile loads failing'}`;
+    }
+  });
+
+  // ---- Appalachian Trail overlay (centerline + shelters from /at_GE) ----
+  const AT_RADIUS = 80000;          // only keep data within 80 km of the summit
+  const TRAIL_LIFT = 15;            // drape lift for the KML line (it has no elevations)
+  const GPX_LIFT = 25;              // clearance over tile terrain when using GPX elevations
+  const GEOID_M = -28;              // approx geoid undulation here: ellipsoid ≈ MSL − 28 m
+  const clampQueue = [];            // shelter points draped onto terrain by raycast
+  let trailClamps = [];             // KML trail points; GPX places by real elevation instead
+  const ecefToScene = tiles.group.matrix;
+  const shelterLabels = [];
+  const trailGroup = new THREE.Group();
+  scene.add(trailGroup);
+  const trailMat = new THREE.LineBasicMaterial({ color: 0xe8623a });
+  const trailCache = {};            // mode -> array of point runs
+  let trailMode = null, trailLoadSeq = 0;
+
+  function llToScene(lon, lat, h = 0) {
+    const p = new THREE.Vector3().setFromMatrixPosition(enuToEcef(lat, lon, h));
+    return p.applyMatrix4(ecefToScene);
+  }
+
+  function makeLabel(text, accent = '#e8623a') {
+    const fs = 44, pad = 14;
+    const c = document.createElement('canvas');
+    let ctx = c.getContext('2d');
+    ctx.font = `italic ${fs}px Georgia`;
+    c.width = Math.ceil(ctx.measureText(text).width) + pad * 2;
+    c.height = fs + pad * 2;
+    ctx = c.getContext('2d');
+    ctx.fillStyle = 'rgba(20,24,29,0.78)';
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 4;
+    ctx.strokeRect(0, 0, c.width, c.height);
+    ctx.font = `italic ${fs}px Georgia`;
+    ctx.fillStyle = '#eef3f6';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, pad, c.height / 2 + 2);
+    const spr = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: new THREE.CanvasTexture(c), depthTest: false, transparent: true,
+    }));
+    spr.renderOrder = 10;
+    spr.userData.aspect = c.width / c.height;
+    return spr;
+  }
+
+  async function loadTrailRuns(mode) {
+    if (trailCache[mode]) return trailCache[mode];
+    const runs = [];
+    let run = [];
+    const endRun = () => { if (run.length > 1) runs.push(run); run = []; };
+    if (mode === 'fast') {
+      const doc = await fetch('at_GE/at_centerline_full_10k_split_500.kml')
+        .then(r => r.text()).then(t => new DOMParser().parseFromString(t, 'text/xml'));
+      for (const ls of doc.getElementsByTagName('LineString')) {
+        for (const c of ls.getElementsByTagName('coordinates')[0].textContent.trim().split(/\s+/)) {
+          const [lon, lat] = c.split(',').map(Number);
+          const p = llToScene(lon, lat, 500);
+          if (Math.hypot(p.x, p.z) < AT_RADIUS) run.push(p);
+          else endRun();
+        }
+        endRun();
+      }
+    } else {
+      // 27 MB of XML — a regex scan is much lighter than DOMParser here.
+      const text = await fetch('at_GE/at_centerline_full.gpx').then(r => r.text());
+      const re = /<trkpt lat="(-?[\d.]+)" lon="(-?[\d.]+)">\s*<ele>(-?[\d.]+)/g;
+      for (let m; (m = re.exec(text)); ) {
+        const p = llToScene(+m[2], +m[1], +m[3] + GEOID_M + GPX_LIFT);
+        if (Math.hypot(p.x, p.z) >= AT_RADIUS) { endRun(); continue; }
+        if (run.length && p.distanceTo(run[run.length - 1]) > 1000) endRun(); // trkseg jump
+        run.push(p);
+      }
+      endRun();
+    }
+    trailCache[mode] = runs;
+    return runs;
+  }
+
+  function showTrail(mode) {
+    if (mode === trailMode) return;
+    trailMode = mode;
+    const seq = ++trailLoadSeq;
+    loadTrailRuns(mode).then(runs => {
+      if (seq !== trailLoadSeq) return;     // superseded by a newer switch
+      for (const line of trailGroup.children) line.geometry.dispose();
+      trailGroup.clear();
+      trailClamps = [];
+      for (const r of runs) {
+        const geo = new THREE.BufferGeometry().setFromPoints(r);
+        const line = new THREE.Line(geo, trailMat);
+        line.frustumCulled = false;
+        trailGroup.add(line);
+        if (mode === 'fast') {              // no elevations in the KML: drape onto tiles
+          const pos = geo.attributes.position;
+          r.forEach((p, i) => trailClamps.push({
+            x: p.x, z: p.z,
+            apply: y => { pos.setY(i, y + TRAIL_LIFT); pos.needsUpdate = true; },
+          }));
+        }
+      }
+    }).catch(err => console.error('trail load failed:', err));
+  }
+
+  async function loadATOverlay() {
+    const shelterDoc = await fetch('at_GE/at_shelters_sym.kml')
+      .then(r => r.text()).then(t => new DOMParser().parseFromString(t, 'text/xml'));
+
+    const poleGeo = new THREE.CylinderGeometry(2, 2, 60, 6);
+    const poleMat = new THREE.MeshBasicMaterial({ color: 0xe8623a });
+    const pickupMat = new THREE.MeshBasicMaterial({ color: 0xffd23f });
+    for (const pm of shelterDoc.getElementsByTagName('Placemark')) {
+      const name = pm.getElementsByTagName('name')[0]?.textContent;
+      const coords = pm.getElementsByTagName('coordinates')[0]?.textContent.trim();
+      if (!name || !coords) continue;
+      // anything not using the stock shelter pushpin style gets the standout gold
+      const stock = pm.getElementsByTagName('styleUrl')[0]?.textContent === '#m_ylw-pushpin_copy1';
+      const [lon, lat] = coords.split(',').map(Number);
+      const p = llToScene(lon, lat, 500);
+      if (Math.hypot(p.x, p.z) >= AT_RADIUS) continue;
+      const g = new THREE.Group();
+      g.position.copy(p);
+      const pole = new THREE.Mesh(poleGeo, stock ? poleMat : pickupMat);
+      pole.position.y = 30;
+      const label = makeLabel(name, stock ? '#e8623a' : '#ffd23f');
+      label.position.y = 90;
+      g.add(pole, label);
+      scene.add(g);
+      shelterLabels.push(label);
+      clampQueue.push({ x: p.x, z: p.z, apply: y => g.position.setY(y) });
+    }
+  }
+  loadATOverlay().catch(err => console.error('AT overlay failed:', err));
+  showTrail(document.querySelector('input[name="trailRes"]:checked')?.value || 'high');
+  addEventListener('keydown', e => {
+    if (e.code === 'KeyT' && !e.repeat) showTrail(trailMode === 'high' ? 'fast' : 'high');
+  });
+
+  // Drape a few queued points per frame onto whatever tiles have loaded so far.
+  // Cycle forever so points refine as higher-LOD tiles stream in. A downward ray
+  // also hits the far side of the globe (y ≈ -6.3e6), so require a plausible
+  // local-terrain height — otherwise leave the point for a later pass.
+  const downRay = new THREE.Raycaster();
+  const DOWN = new THREE.Vector3(0, -1, 0);
+  const rayOrigin = new THREE.Vector3();
+  let clampPtr = 0;
+  function processClamps() {
+    const total = clampQueue.length + trailClamps.length;
+    for (let n = 0; n < 4 && total > 0; n++) {
+      clampPtr = (clampPtr + 1) % total;
+      const c = clampPtr < clampQueue.length
+        ? clampQueue[clampPtr]
+        : trailClamps[clampPtr - clampQueue.length];
+      downRay.set(rayOrigin.set(c.x, 8000, c.z), DOWN);
+      const hit = downRay.intersectObject(tiles.group, true)
+        .find(h => h.point.y > -2600 && h.point.y < 500);
+      if (hit) c.apply(hit.point.y);
+    }
+  }
+
+  // ---- desktop fallback controls ----
+  const keys = {};
+  addEventListener('keydown', e => keys[e.code] = true);
+  addEventListener('keyup',   e => keys[e.code] = false);
+  let dragging = false, yaw = 0, pitch = 0;
+  renderer.domElement.addEventListener('pointerdown', () => dragging = true);
+  addEventListener('pointerup', () => dragging = false);
+  addEventListener('pointermove', e => {
+    if (!dragging || renderer.xr.isPresenting) return;
+    yaw   -= e.movementX * 0.0022;
+    pitch -= e.movementY * 0.0022;
+    pitch = Math.max(-1.45, Math.min(1.45, pitch));
+    camera.rotation.set(pitch, 0, 0);
+    player.rotation.y = yaw;
+  });
+
+  addEventListener('resize', () => {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+
+  // ---- flight ----
+  const BASE_SPEED = 70;                       // m/s
+  const headQuat = new THREE.Quaternion();
+  const fwd = new THREE.Vector3(), rightV = new THREE.Vector3();
+  const clock = new THREE.Clock();
+
+  function flyVR(dt) {
+    const session = renderer.xr.getSession();
+    if (!session) return;
+    renderer.xr.getCamera().getWorldQuaternion(headQuat);
+    for (const src of session.inputSources) {
+      const gp = src.gamepad;
+      if (!gp) continue;
+      const x = gp.axes[2] ?? gp.axes[0] ?? 0;
+      const y = gp.axes[3] ?? gp.axes[1] ?? 0;
+      const boost = gp.buttons[0]?.pressed ? 5 : 1;   // trigger
+      if (src.handedness === 'left') {
+        if (Math.abs(y) > 0.15) {
+          fwd.set(0, 0, -1).applyQuaternion(headQuat);          // fly where you look
+          player.position.addScaledVector(fwd, -y * BASE_SPEED * boost * dt);
+        }
+        if (Math.abs(x) > 0.15) {
+          rightV.set(1, 0, 0).applyQuaternion(headQuat);
+          player.position.addScaledVector(rightV, x * BASE_SPEED * boost * dt);
+        }
+      } else if (src.handedness === 'right') {
+        if (Math.abs(x) > 0.2) player.rotation.y -= x * 1.6 * dt;            // turn
+        if (Math.abs(y) > 0.2) player.position.y -= y * BASE_SPEED * boost * dt * 0.7; // rise/sink
+      }
+    }
+  }
+
+  function flyDesktop(dt) {
+    if (renderer.xr.isPresenting) return;
+    const boost = keys['ShiftLeft'] || keys['ShiftRight'] ? 5 : 1;
+    const v = BASE_SPEED * 2 * boost * dt;
+    camera.getWorldQuaternion(headQuat);
+    fwd.set(0, 0, -1).applyQuaternion(headQuat);
+    rightV.set(1, 0, 0).applyQuaternion(headQuat);
+    if (keys['KeyW']) player.position.addScaledVector(fwd, v);
+    if (keys['KeyS']) player.position.addScaledVector(fwd, -v);
+    if (keys['KeyA']) player.position.addScaledVector(rightV, -v);
+    if (keys['KeyD']) player.position.addScaledVector(rightV, v);
+    if (keys['KeyR']) player.position.y += v;
+    if (keys['KeyF']) player.position.y -= v;
+  }
+
+  let hudTimer = 0;
+  renderer.setAnimationLoop(() => {
+    const dt = Math.min(clock.getDelta(), 0.1);
+    flyVR(dt);
+    flyDesktop(dt);
+
+    camera.updateMatrixWorld();
+    tiles.setResolutionFromRenderer(camera, renderer);
+    tiles.update();
+    processClamps();
+
+    // keep shelter labels readable at any distance
+    for (const label of shelterLabels) {
+      label.getWorldPosition(fwd);
+      const h = THREE.MathUtils.clamp(fwd.distanceTo(player.position) * 0.03, 30, 500);
+      label.scale.set(h * label.userData.aspect, h, 1);
+    }
+
+    hudTimer += dt;
+    if (hudTimer > 0.5) {
+      hudTimer = 0;
+      const alt = (SUMMIT_M + player.position.y).toFixed(0);
+      hudStats.textContent = `ALT ${alt} m MSL · trail: ${trailMode} · Baxter Peak bearing: look north${tileErrMsg}`;
+      const attr = tiles.getAttributions?.() || [];
+      credits.textContent = attr.length
+        ? attr.map(a => a.value).join(' · ')
+        : 'Map data © Google';
+    }
+
+    renderer.render(scene, camera);
+  });
+}
+</script>
+</body>
+</html>
