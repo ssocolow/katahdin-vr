@@ -119,8 +119,9 @@
       <a href="https://console.cloud.google.com/google/maps-apis/credentials"
          target="_blank" rel="noopener">APIs &amp; Services → Credentials</a>.
       <br><br>
-      <b>Quest:</b> serve this file over HTTPS (e.g. GitHub Pages), open it in the Quest
-      browser, then tap <i>Enter VR</i>.<br>
+      <b>Quest:</b> open this page in the Quest browser and tap <i>Enter VR</i>.
+      Move like Google Earth VR: hold trigger or grip and drag the world; fling and
+      release to glide. Flick the right stick to snap-turn.<br>
       <b>Desktop:</b> the full control reference appears in the corner once you're flying.
     </p>
   </div>
@@ -131,8 +132,8 @@
   <div class="hudKeys">
     <b>W A S D</b> fly · <b>R / F</b> up / down · <b>Shift</b> 5× boost ·
     <b>drag</b> look · <b>T</b> trail detail<br>
-    <b>VR</b> — <b>L stick</b> fly where you look · <b>R stick</b> turn &amp; altitude ·
-    <b>trigger</b> boost
+    <b>VR</b> — hold <b>trigger</b> &amp; drag the world · fling to glide ·
+    <b>R stick</b> snap turn
   </div>
 </div>
 <div id="credits"></div>
@@ -153,6 +154,7 @@
 <script type="module">
 import * as THREE from 'three';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
+import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { TilesRenderer } from '3d-tiles-renderer';
 import { GoogleCloudAuthPlugin, GLTFExtensionsPlugin } from '3d-tiles-renderer/plugins';
@@ -449,33 +451,63 @@ function init(apiKey) {
   });
 
   // ---- flight ----
-  const BASE_SPEED = 70;                       // m/s
+  const BASE_SPEED = 70;                       // m/s (desktop)
   const headQuat = new THREE.Quaternion();
   const fwd = new THREE.Vector3(), rightV = new THREE.Vector3();
   const clock = new THREE.Clock();
 
-  function flyVR(dt) {
+  // ---- VR: Google-Earth-VR-style grab & drag ----
+  // Hold trigger or grip and pull the world toward you; release while moving
+  // to fling yourself with momentum. Hand motion is amplified to mountain scale.
+  const DRAG_SCALE = 80;                       // 1 m of hand travel = 80 m of flight
+  const drag = { grip: null, prev: new THREE.Vector3(), vel: new THREE.Vector3() };
+  const dragDelta = new THREE.Vector3();
+  const UP = new THREE.Vector3(0, 1, 0);
+  const ctrlFactory = new XRControllerModelFactory();
+  for (let i = 0; i < 2; i++) {
+    const grip = renderer.xr.getControllerGrip(i);
+    grip.add(ctrlFactory.createControllerModel(grip));
+    player.add(grip);
+    player.add(renderer.xr.getController(i));  // target-ray space, keeps events flowing
+    const start = () => { drag.grip = grip; drag.prev.copy(grip.position); };
+    const end = () => { if (drag.grip === grip) drag.grip = null; };
+    grip.addEventListener('selectstart', start);
+    grip.addEventListener('selectend', end);
+    grip.addEventListener('squeezestart', start);
+    grip.addEventListener('squeezeend', end);
+  }
+
+  function dragVR(dt) {
+    if (!renderer.xr.isPresenting) return;
+    if (drag.grip) {
+      dragDelta.copy(drag.grip.position).sub(drag.prev);   // hand delta in rig space
+      drag.prev.copy(drag.grip.position);
+      dragDelta.applyQuaternion(player.quaternion)         // rig space -> world
+               .multiplyScalar(-DRAG_SCALE);               // world follows the hand
+      player.position.add(dragDelta);
+      if (dt > 0) drag.vel.copy(dragDelta).divideScalar(dt).clampLength(0, 1500);
+    } else {
+      player.position.addScaledVector(drag.vel, dt);       // glide after release
+      drag.vel.multiplyScalar(Math.max(0, 1 - 2.5 * dt));  // ease to a stop
+    }
+  }
+
+  // comfort snap turn on right stick, pivoting around the headset
+  let snapReady = true;
+  function snapTurnVR() {
     const session = renderer.xr.getSession();
     if (!session) return;
-    renderer.xr.getCamera().getWorldQuaternion(headQuat);
     for (const src of session.inputSources) {
-      const gp = src.gamepad;
-      if (!gp) continue;
-      const x = gp.axes[2] ?? gp.axes[0] ?? 0;
-      const y = gp.axes[3] ?? gp.axes[1] ?? 0;
-      const boost = gp.buttons[0]?.pressed ? 5 : 1;   // trigger
-      if (src.handedness === 'left') {
-        if (Math.abs(y) > 0.15) {
-          fwd.set(0, 0, -1).applyQuaternion(headQuat);          // fly where you look
-          player.position.addScaledVector(fwd, -y * BASE_SPEED * boost * dt);
-        }
-        if (Math.abs(x) > 0.15) {
-          rightV.set(1, 0, 0).applyQuaternion(headQuat);
-          player.position.addScaledVector(rightV, x * BASE_SPEED * boost * dt);
-        }
-      } else if (src.handedness === 'right') {
-        if (Math.abs(x) > 0.2) player.rotation.y -= x * 1.6 * dt;            // turn
-        if (Math.abs(y) > 0.2) player.position.y -= y * BASE_SPEED * boost * dt * 0.7; // rise/sink
+      if (src.handedness !== 'right' || !src.gamepad) continue;
+      const x = src.gamepad.axes[2] ?? src.gamepad.axes[0] ?? 0;
+      if (snapReady && Math.abs(x) > 0.6) {
+        snapReady = false;
+        const angle = -Math.sign(x) * Math.PI / 4;
+        renderer.xr.getCamera().getWorldPosition(fwd);     // pivot on head, not rig origin
+        player.position.sub(fwd).applyAxisAngle(UP, angle).add(fwd);
+        player.rotation.y += angle;
+      } else if (Math.abs(x) < 0.3) {
+        snapReady = true;
       }
     }
   }
@@ -495,14 +527,34 @@ function init(apiKey) {
     if (keys['KeyF']) player.position.y -= v;
   }
 
+  // While presenting, drive tile selection from the XR camera: its pose, wide
+  // per-eye frustum, and eye-buffer resolution differ a lot from the desktop
+  // camera, and using the wrong one leaves tiles blurry and slow to refine.
+  let tilesCamera = camera;
+  function syncTilesCamera() {
+    const active = renderer.xr.isPresenting ? renderer.xr.getCamera() : camera;
+    if (active !== tilesCamera) {
+      tiles.deleteCamera(tilesCamera);
+      tiles.setCamera(active);
+      tilesCamera = active;
+    }
+    if (renderer.xr.isPresenting) {
+      const layer = renderer.xr.getSession().renderState.baseLayer;
+      if (layer) tiles.setResolution(active, layer.framebufferWidth / 2, layer.framebufferHeight);
+    } else {
+      tiles.setResolutionFromRenderer(active, renderer);
+    }
+  }
+
   let hudTimer = 0;
   renderer.setAnimationLoop(() => {
     const dt = Math.min(clock.getDelta(), 0.1);
-    flyVR(dt);
+    dragVR(dt);
+    snapTurnVR();
     flyDesktop(dt);
 
     camera.updateMatrixWorld();
-    tiles.setResolutionFromRenderer(camera, renderer);
+    syncTilesCamera();
     tiles.update();
     processClamps();
 
