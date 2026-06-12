@@ -219,7 +219,7 @@ function init(apiKey) {
   renderer.setSize(innerWidth, innerHeight);
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.xr.enabled = true;
-  renderer.xr.setFoveation(1);
+  renderer.xr.setFoveation(0.5);   // 1 = max foveation; cheaper but visibly soft edges
   document.body.appendChild(renderer.domElement);
 
   // ---- Google Photorealistic 3D Tiles ----
@@ -537,16 +537,24 @@ function init(apiKey) {
     if (renderer.xr.isPresenting) {
       const xrCamera = renderer.xr.getCamera();
       const leftCam = xrCamera.cameras[0];
-      if (!xrCamConfigured && leftCam && leftCam.viewport.z > 0) {
-        tiles.cameras.forEach(c => tiles.deleteCamera(c));
-        tiles.setCamera(xrCamera);
+      if (leftCam && leftCam.viewport.z > 0) {
+        if (!xrCamConfigured) {
+          tiles.cameras.forEach(c => tiles.deleteCamera(c));
+          tiles.setCamera(xrCamera);
+          // the combined two-eye frustum is ~2x wider than the 60° desktop view,
+          // so the same errorTarget reads ~2x coarser per degree — halve it
+          tiles.errorTarget = 10;
+          xrCamConfigured = true;
+        }
+        // resolution can change after session start (viewport ramps up while the
+        // enter-VR transition plays), so keep it in sync every frame
         tiles.setResolution(xrCamera, leftCam.viewport.z, leftCam.viewport.w);
-        xrCamConfigured = true;
       }
     } else {
       if (xrCamConfigured) {
         tiles.cameras.forEach(c => tiles.deleteCamera(c));
         tiles.setCamera(camera);
+        tiles.errorTarget = 20;
         xrCamConfigured = false;
       }
       tiles.setResolutionFromRenderer(camera, renderer);
