@@ -459,14 +459,21 @@ function init(apiKey) {
   // ---- VR: Google-Earth-VR-style grab & drag ----
   // Hold trigger or grip and pull the world toward you; release while moving
   // to fling yourself with momentum. Hand motion is amplified to mountain scale.
-  const DRAG_SCALE = 80;                       // 1 m of hand travel = 80 m of flight
+  const DRAG_SCALE = 350;                      // 1 m of hand travel = 350 m of flight
   const drag = { grip: null, prev: new THREE.Vector3(), vel: new THREE.Vector3() };
   const dragDelta = new THREE.Vector3();
   const UP = new THREE.Vector3(0, 1, 0);
+  // controller models are PBR and the scene is otherwise unlit (tiles use
+  // MeshBasicMaterial) — without this light the controllers render black
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x3a4750, 3));
   const ctrlFactory = new XRControllerModelFactory();
   for (let i = 0; i < 2; i++) {
     const grip = renderer.xr.getControllerGrip(i);
     grip.add(ctrlFactory.createControllerModel(grip));
+    // unlit marker so hands are visible even if the model fails to load
+    grip.add(new THREE.Mesh(
+      new THREE.SphereGeometry(0.025, 12, 8),
+      new THREE.MeshBasicMaterial({ color: 0xe8623a })));
     player.add(grip);
     player.add(renderer.xr.getController(i));  // target-ray space, keeps events flowing
     const start = () => { drag.grip = grip; drag.prev.copy(grip.position); };
@@ -503,7 +510,10 @@ function init(apiKey) {
       if (snapReady && Math.abs(x) > 0.6) {
         snapReady = false;
         const angle = -Math.sign(x) * Math.PI / 4;
-        renderer.xr.getCamera().getWorldPosition(fwd);     // pivot on head, not rig origin
+        // pivot on the head. Use the rig-tracked user camera — NOT
+        // renderer.xr.getCamera(), whose world matrix is managed externally and
+        // gets corrupted by getWorldPosition() recomposing it from stale values
+        camera.getWorldPosition(fwd);
         player.position.sub(fwd).applyAxisAngle(UP, angle).add(fwd);
         player.rotation.y += angle;
       } else if (Math.abs(x) < 0.3) {
@@ -532,6 +542,13 @@ function init(apiKey) {
   // camera, and using the wrong one leaves tiles blurry and slow to refine.
   // Configure once per session, reading the eye size from the per-eye viewport
   // (renderState.baseLayer is null on browsers using the WebXR layers path).
+  // VR tile-culling camera. Don't register the XR ArrayCamera with the tiles
+  // renderer: three.js manages its world matrix specially, so reading or
+  // recomposing it outside the render gives a pose stuck near the scene origin
+  // — tiles then refine around the summit instead of around you. The proxy
+  // combines the headset's true world pose (via the rig-tracked user camera)
+  // with the XR camera's combined two-eye projection.
+  const xrProxyCam = new THREE.PerspectiveCamera();
   let xrCamConfigured = false;
   function syncTilesCamera() {
     if (renderer.xr.isPresenting) {
@@ -540,15 +557,19 @@ function init(apiKey) {
       if (leftCam && leftCam.viewport.z > 0) {
         if (!xrCamConfigured) {
           tiles.cameras.forEach(c => tiles.deleteCamera(c));
-          tiles.setCamera(xrCamera);
-          // the combined two-eye frustum is ~2x wider than the 60° desktop view,
-          // so the same errorTarget reads ~2x coarser per degree — halve it
+          tiles.setCamera(xrProxyCam);
+          // the two-eye frustum is ~2x wider than the 60° desktop view, so the
+          // same errorTarget reads ~2x coarser per degree — halve it
           tiles.errorTarget = 10;
           xrCamConfigured = true;
         }
-        // resolution can change after session start (viewport ramps up while the
-        // enter-VR transition plays), so keep it in sync every frame
-        tiles.setResolution(xrCamera, leftCam.viewport.z, leftCam.viewport.w);
+        camera.matrixWorld.decompose(xrProxyCam.position, xrProxyCam.quaternion, xrProxyCam.scale);
+        xrProxyCam.updateMatrixWorld(true);
+        xrProxyCam.projectionMatrix.copy(xrCamera.projectionMatrix);
+        xrProxyCam.projectionMatrixInverse.copy(xrCamera.projectionMatrixInverse);
+        // resolution can change after session start (viewport ramps up while
+        // the enter-VR transition plays), so keep it in sync every frame
+        tiles.setResolution(xrProxyCam, leftCam.viewport.z, leftCam.viewport.w);
       }
     } else {
       if (xrCamConfigured) {
