@@ -530,19 +530,26 @@ function init(apiKey) {
   // While presenting, drive tile selection from the XR camera: its pose, wide
   // per-eye frustum, and eye-buffer resolution differ a lot from the desktop
   // camera, and using the wrong one leaves tiles blurry and slow to refine.
-  let tilesCamera = camera;
+  // Configure once per session, reading the eye size from the per-eye viewport
+  // (renderState.baseLayer is null on browsers using the WebXR layers path).
+  let xrCamConfigured = false;
   function syncTilesCamera() {
-    const active = renderer.xr.isPresenting ? renderer.xr.getCamera() : camera;
-    if (active !== tilesCamera) {
-      tiles.deleteCamera(tilesCamera);
-      tiles.setCamera(active);
-      tilesCamera = active;
-    }
     if (renderer.xr.isPresenting) {
-      const layer = renderer.xr.getSession().renderState.baseLayer;
-      if (layer) tiles.setResolution(active, layer.framebufferWidth / 2, layer.framebufferHeight);
+      const xrCamera = renderer.xr.getCamera();
+      const leftCam = xrCamera.cameras[0];
+      if (!xrCamConfigured && leftCam && leftCam.viewport.z > 0) {
+        tiles.cameras.forEach(c => tiles.deleteCamera(c));
+        tiles.setCamera(xrCamera);
+        tiles.setResolution(xrCamera, leftCam.viewport.z, leftCam.viewport.w);
+        xrCamConfigured = true;
+      }
     } else {
-      tiles.setResolutionFromRenderer(active, renderer);
+      if (xrCamConfigured) {
+        tiles.cameras.forEach(c => tiles.deleteCamera(c));
+        tiles.setCamera(camera);
+        xrCamConfigured = false;
+      }
+      tiles.setResolutionFromRenderer(camera, renderer);
     }
   }
 
