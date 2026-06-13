@@ -156,7 +156,7 @@ import * as THREE from 'three';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
 import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-import { TilesRenderer } from '3d-tiles-renderer';
+import { TilesRenderer, Scheduler } from '3d-tiles-renderer';
 import { GoogleCloudAuthPlugin, GLTFExtensionsPlugin } from '3d-tiles-renderer/plugins';
 
 // ---- Mount Katahdin, Baxter Peak ----
@@ -459,7 +459,7 @@ function init(apiKey) {
   // ---- VR: Google-Earth-VR-style grab & drag ----
   // Hold trigger or grip and pull the world toward you; release while moving
   // to fling yourself with momentum. Hand motion is amplified to mountain scale.
-  const DRAG_SCALE = 350;                      // 1 m of hand travel = 350 m of flight
+  const DRAG_SCALE = 800;                      // 1 m of hand travel = 800 m of flight
   const drag = { grip: null, prev: new THREE.Vector3(), vel: new THREE.Vector3() };
   const dragDelta = new THREE.Vector3();
   const UP = new THREE.Vector3(0, 1, 0);
@@ -492,7 +492,7 @@ function init(apiKey) {
       dragDelta.applyQuaternion(player.quaternion)         // rig space -> world
                .multiplyScalar(-DRAG_SCALE);               // world follows the hand
       player.position.add(dragDelta);
-      if (dt > 0) drag.vel.copy(dragDelta).divideScalar(dt).clampLength(0, 1500);
+      if (dt > 0) drag.vel.copy(dragDelta).divideScalar(dt).clampLength(0, 4000);
     } else {
       player.position.addScaledVector(drag.vel, dt);       // glide after release
       drag.vel.multiplyScalar(Math.max(0, 1 - 2.5 * dt));  // ease to a stop
@@ -561,6 +561,10 @@ function init(apiKey) {
           // the two-eye frustum is ~2x wider than the 60° desktop view, so the
           // same errorTarget reads ~2x coarser per degree — halve it
           tiles.errorTarget = 10;
+          // CRITICAL: the tile queues tick on window.requestAnimationFrame,
+          // which the browser suspends during an immersive session — without
+          // this, downloads stall until a system overlay interrupts VR
+          Scheduler.setXRSession(renderer.xr.getSession());
           xrCamConfigured = true;
         }
         camera.matrixWorld.decompose(xrProxyCam.position, xrProxyCam.quaternion, xrProxyCam.scale);
@@ -576,6 +580,7 @@ function init(apiKey) {
         tiles.cameras.forEach(c => tiles.deleteCamera(c));
         tiles.setCamera(camera);
         tiles.errorTarget = 20;
+        Scheduler.setXRSession(null);
         xrCamConfigured = false;
       }
       tiles.setResolutionFromRenderer(camera, renderer);
